@@ -1,0 +1,6 @@
+{
+  "name": "RT Run",
+  "description": "RT Run — Jogo 3D estilo Subway Surfers com skins, mapas variados, sistema de contas e Top Global No Coin.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
