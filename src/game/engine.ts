@@ -3,17 +3,21 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { getMapById, getSkinById, MapTheme, RunnerSkin } from './catalog';
 import {
   clampLane,
+  computeMovingTrainSpawnZ,
   computeSpeedForDistance,
+  computeWaveGap,
   createNoCoinState,
   evaluatePlayerObstacle,
   FAST_FALL_VELOCITY,
   GRAVITY,
   JUMP_VELOCITY,
+  LANE_WIDTH,
   LaneIndex,
   laneToX,
   lockNoCoinOnCoinPickup,
   NoCoinState,
   ObstacleColliderSpec,
+  planNextWave,
   tickNoCoin,
 } from './rules';
 import {
@@ -149,6 +153,7 @@ export class RTRunEngine {
   private obstacles: ActiveObstacle[] = [];
   private coins: ActiveCoin[] = [];
   private nextSpawnZ = -34;
+  private prevOpenLane: LaneIndex | null = 0;
 
   // Pooled burst particles
   private particleMesh: THREE.InstancedMesh;
@@ -440,6 +445,7 @@ export class RTRunEngine {
     this.crashDelayTimer = 0;
     this.pendingCrashSummary = null;
     this.nextSpawnZ = -34;
+    this.prevOpenLane = 0;
 
     this.runnerRig.root.position.set(0, 0, 0);
     this.runnerRig.bodyPivot.rotation.set(0, 0, 0);
@@ -498,7 +504,7 @@ export class RTRunEngine {
 
   public jump() {
     if (this.phase !== 'playing' || this.crashDelayTimer > 0) return;
-    this.jumpBufferTimer = 0.13;
+    this.jumpBufferTimer = 0.16;
   }
 
   public slide() {
@@ -545,56 +551,85 @@ export class RTRunEngine {
 
   private spawnWave() {
     const zBase = this.nextSpawnZ;
-    const lanes: LaneIndex[] = [-1, 0, 1];
-    const openLane = lanes[Math.floor(Math.random() * lanes.length)];
-    const difficulty = Math.min(1, this.distance / 1100);
+    const speed = computeSpeedForDistance(this.distance);
+    const blockedLanes: Record<LaneIndex, boolean> = {
+      [-1]: false,
+      [0]: false,
+      [1]: false,
+    };
 
-    for (const l of lanes) {
-      const x = laneToX(l);
-      if (l === openLane) {
-        const roll = Math.random();
-        if (roll < 0.52) {
-          this.spawnCoinLine(x, zBase, 4, 2.2, 0.9);
-        } else if (roll < 0.78) {
-          this.spawnLowBarrier(x, zBase);
-          this.spawnCoinArc(x, zBase, 0.9);
-        } else {
-          this.spawnHighSign(x, zBase);
-          this.spawnCoinLine(x, zBase - 1, 3, 2.2, 0.7);
+    const timeToPlayer = Math.max(0, -zBase) / Math.max(10, speed);
+    for (const obs of this.obstacles) {
+      const obsLane = clampLane(Math.round(obs.spec.x / LANE_WIDTH));
+      if (obs.speedZ > 0) {
+        const obsFutureZ = obs.spec.z + (speed + obs.speedZ) * timeToPlayer;
+        if (obs.spec.z <= zBase + 24 || Math.abs(obsFutureZ) <= 24) {
+          blockedLanes[obsLane] = true;
         }
-        continue;
-      }
-
-      const roll = Math.random();
-      if (roll < 0.44 + difficulty * 0.22) {
-        const hasRamp = Math.random() < 0.35;
-        this.spawnTrain(x, zBase, hasRamp);
-        if (hasRamp || Math.random() < 0.5) {
-          this.spawnCoinLine(x, zBase - 1.5, 4, 2.4, 3.85);
-        }
-      } else if (roll < 0.72) {
-        this.spawnLowBarrier(x, zBase);
-      } else if (roll < 0.9) {
-        this.spawnHighSign(x, zBase);
-      } else {
-        this.spawnCoinLine(x, zBase, 3, 2.2, 0.9);
+      } else if (Math.abs(obs.spec.z - zBase) < 20) {
+        blockedLanes[obsLane] = true;
       }
     }
 
-    const gap = 25 + Math.random() * 8;
-    this.nextSpawnZ -= gap;
+    const plan = planNextWave({
+      distanceMeters: this.distance,
+      prevOpenLane: this.prevOpenLane,
+      blockedLanes,
+      rng: Math.random,
+    });
+    this.prevOpenLane = plan.openLane;
+
+    for (const item of plan.items) {
+      const x = laneToX(item.lane);
+      switch (item.kind) {
+        case 'clear':
+          break;
+        case 'coins':
+          this.spawnCoinLine(x, zBase, 4, 2.2, 0.9);
+          break;
+        case 'low-barrier':
+          this.spawnLowBarrier(x, zBase);
+          if (item.withCoins) this.spawnCoinArc(x, zBase, 0.9);
+          break;
+        case 'high-sign':
+          this.spawnHighSign(x, zBase);
+          if (item.withCoins) this.spawnCoinLine(x, zBase - 1, 3, 2.2, 0.7);
+          break;
+        case 'train':
+          this.spawnTrain(x, zBase, false, false);
+          if (item.withCoins) this.spawnCoinLine(x, zBase - 1.5, 4, 2.4, 3.85);
+          break;
+        case 'ramp-train':
+          this.spawnTrain(x, zBase, true, false);
+          if (item.withCoins) this.spawnCoinLine(x, zBase - 1.5, 4, 2.4, 3.85);
+          break;
+        case 'moving-train': {
+          const trainSpeedZ = 8.0;
+          const zTrain = computeMovingTrainSpawnZ(zBase, speed, trainSpeedZ);
+          this.spawnTrain(x, zTrain, false, true, trainSpeedZ);
+          break;
+        }
+      }
+    }
+
+    this.nextSpawnZ -= computeWaveGap(speed, Math.random());
   }
 
-  private spawnTrain(x: number, z: number, withRamp: boolean) {
+  private spawnTrain(
+    x: number,
+    z: number,
+    withRamp: boolean,
+    moving = false,
+    trainSpeedZ = 8.0
+  ) {
     const built = buildTrainModel(this.currentMap, this.textures, withRamp);
     built.group.position.set(x, 0, z);
     this.worldGroup.add(built.group);
 
-    const moving = !withRamp && Math.random() < 0.38;
     this.obstacles.push({
       mesh: built.group,
       wheels: built.wheels,
-      speedZ: moving ? 9.5 : 0,
+      speedZ: moving && !withRamp ? trainSpeedZ : 0,
       spec: {
         kind: withRamp ? 'ramp-train' : 'train',
         x,
@@ -603,8 +638,8 @@ export class RTRunEngine {
         width: 2.38,
         minY: 0,
         maxY: 3.12,
-        rampStartZ: withRamp ? z + 12.0 : undefined,
-        rampEndZ: withRamp ? z + 6.5 : undefined,
+        rampStartZ: withRamp ? z + 12.2 : undefined,
+        rampEndZ: withRamp ? z + 5.6 : undefined,
         roofY: withRamp ? 3.12 : undefined,
       },
     });
@@ -622,10 +657,10 @@ export class RTRunEngine {
         kind: 'low-barrier',
         x,
         z,
-        length: 0.55,
-        width: 2.2,
+        length: 0.45,
+        width: 2.05,
         minY: 0,
-        maxY: 1.02,
+        maxY: 0.92,
       },
     });
   }
@@ -642,10 +677,10 @@ export class RTRunEngine {
         kind: 'high-sign',
         x,
         z,
-        length: 0.5,
-        width: 2.35,
-        minY: 1.18,
-        maxY: 2.75,
+        length: 0.45,
+        width: 2.15,
+        minY: 1.24,
+        maxY: 2.15,
       },
     });
   }
@@ -883,7 +918,7 @@ export class RTRunEngine {
     this.playerX = THREE.MathUtils.damp(this.playerX, targetX, 16, dt);
     const leanZ = THREE.MathUtils.clamp((prevX - this.playerX) * 0.65, -0.35, 0.35);
 
-    if (this.isGrounded) this.coyoteTimer = 0.085;
+    if (this.isGrounded) this.coyoteTimer = 0.11;
     else this.coyoteTimer = Math.max(0, this.coyoteTimer - dt);
 
     if (this.jumpBufferTimer > 0) {

@@ -764,30 +764,30 @@ export function buildHighSignModel(
     roughness: 0.25,
   });
 
-  const postGeo = new THREE.CylinderGeometry(0.09, 0.11, 2.8, 10);
+  const postGeo = new THREE.CylinderGeometry(0.09, 0.11, 2.18, 10);
   const lPost = new THREE.Mesh(postGeo, postMat);
-  lPost.position.set(-1.24, 1.4, 0);
+  lPost.position.set(-1.24, 1.09, 0);
   lPost.castShadow = true;
   const rPost = new THREE.Mesh(postGeo, postMat);
-  rPost.position.set(1.24, 1.4, 0);
+  rPost.position.set(1.24, 1.09, 0);
   rPost.castShadow = true;
   group.add(lPost, rPost);
 
   const signBoard = new THREE.Mesh(
-    new THREE.BoxGeometry(2.65, 1.25, 0.28),
+    new THREE.BoxGeometry(2.65, 0.86, 0.28),
     boardMat
   );
-  signBoard.position.y = 1.94;
+  signBoard.position.y = 1.68;
   signBoard.castShadow = true;
   group.add(signBoard);
 
   const neonStrip = new THREE.Mesh(
-    new THREE.BoxGeometry(2.55, 0.14, 0.34),
+    new THREE.BoxGeometry(2.55, 0.12, 0.34),
     glowMat
   );
-  neonStrip.position.y = 1.32;
+  neonStrip.position.y = 1.26;
   const topStrip = neonStrip.clone();
-  topStrip.position.y = 2.58;
+  topStrip.position.y = 2.11;
   group.add(neonStrip, topStrip);
 
   return group;
