@@ -6,9 +6,10 @@ import {
   signToken,
   verifyToken,
   AuthTokenPayload,
-} from './auth';
+} from './auth.js';
 import {
   isNeonConfigured,
+  isUniqueViolationError,
   findUserByUsername,
   findUserById,
   createUser,
@@ -20,7 +21,7 @@ import {
   adminResetUserScores,
   adminDeleteUser,
   toPublicUser,
-} from './db';
+} from './db.js';
 
 interface AuthedRequest extends Request {
   auth?: AuthTokenPayload;
@@ -75,9 +76,9 @@ export function createApp() {
           error: 'Usuário deve ter 3 a 24 caracteres (letras, números, _ . -).',
         });
       }
-      if (typeof password !== 'string' || password.length < 4) {
+      if (typeof password !== 'string' || password.length < 4 || password.length > 128) {
         return res.status(400).json({
-          error: 'A senha precisa ter pelo menos 4 caracteres.',
+          error: 'A senha precisa ter entre 4 e 128 caracteres.',
         });
       }
       const existing = await findUserByUsername(username);
@@ -86,9 +87,13 @@ export function createApp() {
           error: 'Este nome de usuário já está em uso.',
         });
       }
+      const cleanDisplay =
+        typeof displayName === 'string' && displayName.trim()
+          ? displayName.trim().slice(0, 40)
+          : username.trim();
       const user = await createUser({
         username,
-        displayName: typeof displayName === 'string' && displayName.trim() ? displayName : username.trim(),
+        displayName: cleanDisplay,
         passwordHash: hashPassword(password),
         selectedSkin: typeof selectedSkin === 'string' ? selectedSkin : 'rt-classic',
         selectedMap: typeof selectedMap === 'string' ? selectedMap : 'metro-central',
@@ -100,6 +105,11 @@ export function createApp() {
       });
       res.status(201).json({ token, user: toPublicUser(user) });
     } catch (err) {
+      if (isUniqueViolationError(err)) {
+        return res.status(409).json({
+          error: 'Este nome de usuário já está em uso.',
+        });
+      }
       console.error('Register error:', err);
       res.status(500).json({ error: 'Erro ao criar conta. Tente novamente.' });
     }
@@ -125,6 +135,10 @@ export function createApp() {
       console.error('Login error:', err);
       res.status(500).json({ error: 'Erro ao entrar. Tente novamente.' });
     }
+  });
+
+  app.post('/api/auth/logout', (_req, res) => {
+    res.json({ ok: true });
   });
 
   app.get('/api/auth/me', requirePlayer, async (req: AuthedRequest, res) => {
@@ -214,15 +228,20 @@ export function createApp() {
   // ---- Confidential ADMIN Endpoints ----
 
   app.post('/api/admin/login', (req, res) => {
-    const { password } = req.body ?? {};
-    if (typeof password !== 'string' || !verifyAdminPassword(password)) {
-      return res.status(401).json({ error: 'Senha administrativa incorreta.' });
+    try {
+      const { password } = req.body ?? {};
+      if (typeof password !== 'string' || !verifyAdminPassword(password)) {
+        return res.status(401).json({ error: 'Senha administrativa incorreta.' });
+      }
+      const adminToken = signToken(
+        { sub: 'admin', role: 'admin' },
+        4 * 60 * 60 * 1000
+      );
+      res.json({ adminToken });
+    } catch (err) {
+      console.error('Admin login error:', err);
+      res.status(500).json({ error: 'Erro interno na autenticação administrativa.' });
     }
-    const adminToken = signToken(
-      { sub: 'admin', role: 'admin' },
-      4 * 60 * 60 * 1000
-    );
-    res.json({ adminToken });
   });
 
   app.get('/api/admin/users', requireAdmin, async (_req, res) => {
@@ -292,6 +311,11 @@ export function createApp() {
       }
       res.json({ user: toPublicUser(updated) });
     } catch (err) {
+      if (isUniqueViolationError(err)) {
+        return res.status(409).json({
+          error: 'Já existe outro usuário com esse nome.',
+        });
+      }
       console.error('Admin update user error:', err);
       res.status(500).json({ error: 'Erro ao atualizar perfil.' });
     }
@@ -329,6 +353,18 @@ export function createApp() {
       console.error('Admin delete user error:', err);
       res.status(500).json({ error: 'Erro ao excluir perfil.' });
     }
+  });
+
+  app.use('/api/*', (_req, res) => {
+    res.status(404).json({ error: 'Rota da API não encontrada.' });
+  });
+
+  app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+    if (err instanceof SyntaxError) {
+      return res.status(400).json({ error: 'Corpo da requisição JSON inválido.' });
+    }
+    console.error('Unhandled API error:', err);
+    res.status(500).json({ error: 'Erro interno do servidor.' });
   });
 
   return app;

@@ -75,6 +75,10 @@ export async function loginPlayer(body: {
   });
 }
 
+export async function logoutPlayer(token?: string | null): Promise<{ ok: boolean }> {
+  return apiFetch('/api/auth/logout', { method: 'POST' }, token);
+}
+
 export async function fetchMe(token: string): Promise<{ user: PublicUser }> {
   return apiFetch('/api/auth/me', {}, token);
 }

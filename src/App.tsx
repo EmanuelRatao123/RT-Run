@@ -26,6 +26,7 @@ import {
 import {
   fetchMe,
   getStoredToken,
+  logoutPlayer,
   PublicUser,
   savePreferences,
   setStoredToken,
@@ -334,9 +335,11 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    const activeToken = tokenRef.current;
     setStoredToken(null);
     setToken(null);
     setUser(null);
+    logoutPlayer(activeToken).catch(() => {});
   };
 
   const refreshProfileAfterAdminChange = () => {

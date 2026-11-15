@@ -48,6 +48,7 @@ export function AuthPanel({
           selectedMap,
         });
         onAuthSuccess(res.token, res.user);
+        setMode('login');
       }
       setPassword('');
     } catch (err) {

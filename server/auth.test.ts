@@ -6,7 +6,7 @@ import {
   signToken,
   verifyToken,
   verifyAdminPassword,
-} from './auth';
+} from './auth.js';
 
 test('hashPassword and verifyPassword use salted scrypt securely', () => {
   const hash1 = hashPassword('minhaSenha123');

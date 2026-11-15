@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { neon } from '@neondatabase/serverless';
-import { hashPassword } from './auth';
+import { hashPassword } from './auth.js';
 
 export interface UserRecord {
   id: number;
@@ -38,11 +38,43 @@ export function toPublicUser(user: UserRecord): PublicUser {
 }
 
 function getConnectionString(): string | undefined {
-  return process.env.DATABASE_URL || process.env.POSTGRES_URL || undefined;
+  const raw =
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.POSTGRES_PRISMA_URL ||
+    process.env.NEON_DATABASE_URL ||
+    '';
+  const cleaned = raw.trim().replace(/^["']|["']$/g, '');
+  return cleaned.length > 0 ? cleaned : undefined;
 }
 
 export function isNeonConfigured(): boolean {
   return Boolean(getConnectionString());
+}
+
+export function isUniqueViolationError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const code = (err as { code?: unknown }).code;
+  if (code === '23505') return true;
+  const msg = String((err as { message?: unknown }).message ?? '').toLowerCase();
+  return msg.includes('duplicate key') || msg.includes('unique constraint');
+}
+
+function clampInt(val: unknown, max = 2_000_000_000): number {
+  const num = Number(val);
+  if (!Number.isFinite(num)) return 0;
+  return Math.min(max, Math.max(0, Math.round(num)));
+}
+
+function toIsoSafe(val: unknown): string {
+  if (val instanceof Date) {
+    return Number.isNaN(val.getTime()) ? new Date().toISOString() : val.toISOString();
+  }
+  if (typeof val === 'string' || typeof val === 'number') {
+    const d = new Date(val);
+    return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+  }
+  return new Date().toISOString();
 }
 
 const SEED_PLAYERS = [
@@ -191,8 +223,8 @@ function mapNeonRow(row: Record<string, unknown>): UserRecord {
     totalRuns: Number(row.total_runs ?? 0),
     selectedSkin: String(row.selected_skin ?? 'rt-classic'),
     selectedMap: String(row.selected_map ?? 'metro-central'),
-    createdAt: new Date(String(row.created_at ?? Date.now())).toISOString(),
-    updatedAt: new Date(String(row.updated_at ?? Date.now())).toISOString(),
+    createdAt: toIsoSafe(row.created_at),
+    updatedAt: toIsoSafe(row.updated_at),
   };
 }
 
@@ -372,11 +404,17 @@ export async function recordRun(input: RunInput): Promise<{
   const existing = await findUserById(input.userId);
   if (!existing) return null;
 
-  const isNewNoCoinRecord = input.noCoinMs > existing.bestNoCoinMs;
-  const isNewScoreRecord = input.score > existing.bestScore;
-  const nextNoCoinMs = Math.max(existing.bestNoCoinMs, Math.round(input.noCoinMs));
-  const nextScore = Math.max(existing.bestScore, Math.round(input.score));
-  const nextDistance = Math.max(existing.bestDistance, Math.round(input.distance));
+  const cleanScore = clampInt(input.score);
+  const cleanDistance = clampInt(input.distance);
+  const cleanCoins = clampInt(input.coins);
+  const cleanNoCoinMs = clampInt(input.noCoinMs);
+  const cleanDurationMs = clampInt(input.durationMs);
+
+  const isNewNoCoinRecord = cleanNoCoinMs > existing.bestNoCoinMs;
+  const isNewScoreRecord = cleanScore > existing.bestScore;
+  const nextNoCoinMs = Math.max(existing.bestNoCoinMs, cleanNoCoinMs);
+  const nextScore = Math.max(existing.bestScore, cleanScore);
+  const nextDistance = Math.max(existing.bestDistance, cleanDistance);
 
   if (isNeonConfigured()) {
     await ensureNeonSchema();
@@ -385,8 +423,8 @@ export async function recordRun(input: RunInput): Promise<{
       INSERT INTO rt_runs (
         user_id, score, distance, coins, no_coin_ms, duration_ms, skin_id, map_id
       ) VALUES (
-        ${input.userId}, ${Math.round(input.score)}, ${Math.round(input.distance)},
-        ${Math.round(input.coins)}, ${Math.round(input.noCoinMs)}, ${Math.round(input.durationMs)},
+        ${input.userId}, ${cleanScore}, ${cleanDistance},
+        ${cleanCoins}, ${cleanNoCoinMs}, ${cleanDurationMs},
         ${input.skinId}, ${input.mapId}
       )
     `;
@@ -432,13 +470,14 @@ export async function recordRun(input: RunInput): Promise<{
 }
 
 export async function getTopNoCoinLeaderboard(limit = 50): Promise<PublicUser[]> {
+  const safeLimit = Math.min(100, Math.max(1, clampInt(limit) || 50));
   if (isNeonConfigured()) {
     await ensureNeonSchema();
     const sql = getSql();
     const rows = await sql`
       SELECT * FROM rt_users
       ORDER BY best_no_coin_ms DESC, best_score DESC, id ASC
-      LIMIT ${limit}
+      LIMIT ${safeLimit}
     `;
     return rows.map((r) => toPublicUser(mapNeonRow(r as Record<string, unknown>)));
   }
@@ -450,7 +489,7 @@ export async function getTopNoCoinLeaderboard(limit = 50): Promise<PublicUser[]>
       if (b.bestScore !== a.bestScore) return b.bestScore - a.bestScore;
       return a.id - b.id;
     })
-    .slice(0, limit)
+    .slice(0, safeLimit)
     .map(toPublicUser);
 }
 
@@ -493,19 +532,19 @@ export async function adminUpdateUser(
   const nextPasswordHash = updates.passwordHash ?? current.passwordHash;
   const nextNoCoin =
     typeof updates.bestNoCoinMs === 'number'
-      ? Math.max(0, Math.round(updates.bestNoCoinMs))
+      ? clampInt(updates.bestNoCoinMs)
       : current.bestNoCoinMs;
   const nextScore =
     typeof updates.bestScore === 'number'
-      ? Math.max(0, Math.round(updates.bestScore))
+      ? clampInt(updates.bestScore)
       : current.bestScore;
   const nextDist =
     typeof updates.bestDistance === 'number'
-      ? Math.max(0, Math.round(updates.bestDistance))
+      ? clampInt(updates.bestDistance)
       : current.bestDistance;
   const nextCoins =
     typeof updates.totalCoins === 'number'
-      ? Math.max(0, Math.round(updates.totalCoins))
+      ? clampInt(updates.totalCoins)
       : current.totalCoins;
 
   if (isNeonConfigured()) {
