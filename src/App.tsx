@@ -8,6 +8,7 @@ import {
   Play,
   Volume2,
   VolumeX,
+  Tv,
 } from 'lucide-react';
 import {
   EngineCallbacks,
@@ -39,6 +40,7 @@ import { LeaderboardModal } from './components/LeaderboardModal';
 import { AdminModal } from './components/AdminModal';
 import { GameHud } from './components/GameHud';
 import { StatusModal } from './components/StatusModal';
+import { YouTubeTelao } from './components/YouTubeTelao';
 
 export default function App() {
   const canvasMountRef = useRef<HTMLDivElement | null>(null);
@@ -64,6 +66,7 @@ export default function App() {
   const [customizeTab, setCustomizeTab] = useState<'skins' | 'maps' | null>(null);
   const [showLeaderboard, setShowLeaderboard] = useState(false);
   const [showAdmin, setShowAdmin] = useState(false);
+  const [telaoOpen, setTelaoOpen] = useState(false);
 
   const [lastSummary, setLastSummary] = useState<RunSummary | null>(null);
   const [isNewNoCoinRecord, setIsNewNoCoinRecord] = useState(false);
@@ -375,6 +378,20 @@ export default function App() {
           <div className="flex items-center justify-end gap-2 pointer-events-auto">
             <button
               type="button"
+              onClick={() => setTelaoOpen((v) => !v)}
+              aria-label={telaoOpen ? 'Fechar Telão YouTube' : 'Abrir Telão YouTube'}
+              className={`px-3.5 py-2 rounded-xl border text-xs font-black flex items-center gap-1.5 cursor-pointer ${
+                telaoOpen
+                  ? 'bg-rose-600 border-rose-400 text-white'
+                  : 'bg-[#090d1a]/88 hover:bg-slate-800 border-rose-500/60 text-rose-300'
+              }`}
+            >
+              <Tv className="w-4 h-4" />
+              <span>Telão YouTube</span>
+            </button>
+
+            <button
+              type="button"
               onClick={handleToggleMute}
               aria-label={muted ? 'Ativar Som' : 'Silenciar Som'}
               className="px-3 py-2 rounded-xl bg-[#090d1a]/88 hover:bg-slate-800 border border-slate-700 text-xs font-bold text-slate-100 flex items-center gap-1.5 cursor-pointer"
@@ -483,9 +500,11 @@ export default function App() {
           lockBannerMs={lockBannerMs}
           muted={muted}
           isFullscreen={isFullscreen}
+          telaoOpen={telaoOpen}
           onToggleMute={handleToggleMute}
           onPause={() => engineRef.current?.pauseRun()}
           onToggleFullscreen={handleToggleFullscreen}
+          onToggleTelao={() => setTelaoOpen((v) => !v)}
           onSwipeAction={(action) => {
             if (action === 'left') engineRef.current?.moveLane(-1);
             else if (action === 'right') engineRef.current?.moveLane(1);
@@ -536,6 +555,9 @@ export default function App() {
           onDataChanged={refreshProfileAfterAdminChange}
         />
       )}
+
+      {/* PERSISTENT FLOATING YOUTUBE TELÃO */}
+      <YouTubeTelao open={telaoOpen} onClose={() => setTelaoOpen(false)} />
     </div>
   );
 }

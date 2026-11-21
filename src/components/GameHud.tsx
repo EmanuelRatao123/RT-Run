@@ -7,6 +7,7 @@ import {
   VolumeX,
   Timer,
   Lock,
+  Tv,
 } from 'lucide-react';
 
 interface GameHudProps {
@@ -18,9 +19,11 @@ interface GameHudProps {
   lockBannerMs: number | null;
   muted: boolean;
   isFullscreen: boolean;
+  telaoOpen: boolean;
   onToggleMute: () => void;
   onPause: () => void;
   onToggleFullscreen: () => void;
+  onToggleTelao: () => void;
   onSwipeAction: (action: 'left' | 'right' | 'jump' | 'slide') => void;
 }
 
@@ -33,9 +36,11 @@ export function GameHud({
   lockBannerMs,
   muted,
   isFullscreen,
+  telaoOpen,
   onToggleMute,
   onPause,
   onToggleFullscreen,
+  onToggleTelao,
   onSwipeAction,
 }: GameHudProps) {
   return (
@@ -122,8 +127,26 @@ export function GameHud({
           )}
         </div>
 
-        {/* Top-Right: Utility Controls (Fullscreen, Mute, Pause) */}
+        {/* Top-Right: Utility Controls (Telão YouTube, Fullscreen, Mute, Pause) */}
         <div className="flex items-center gap-2 pointer-events-auto">
+          <button
+            type="button"
+            tabIndex={-1}
+            onClick={(e) => {
+              e.currentTarget.blur();
+              onToggleTelao();
+            }}
+            aria-label={telaoOpen ? 'Fechar Telão YouTube' : 'Abrir Telão YouTube'}
+            title="Telão YouTube"
+            className={`w-10 h-10 rounded-xl border-2 flex items-center justify-center cursor-pointer transition-colors ${
+              telaoOpen
+                ? 'bg-rose-600 border-rose-400 text-white'
+                : 'bg-[#090d1a]/90 hover:bg-slate-800 border-slate-700 text-rose-400'
+            }`}
+          >
+            <Tv className="w-4 h-4" />
+          </button>
+
           <button
             type="button"
             tabIndex={-1}

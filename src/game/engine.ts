@@ -129,6 +129,22 @@ function detectSoftwareWebGL(): boolean {
   return /SwiftShader|llvmpipe|softpipe|Software|Basic Render/i.test(gpu);
 }
 
+function disposeObject3D(root: THREE.Object3D) {
+  root.traverse((obj) => {
+    const mesh = obj as THREE.Mesh;
+    if (mesh.geometry) {
+      mesh.geometry.dispose();
+    }
+    if (mesh.material) {
+      if (Array.isArray(mesh.material)) {
+        for (const m of mesh.material) m.dispose();
+      } else {
+        mesh.material.dispose();
+      }
+    }
+  });
+}
+
 export class RTRunEngine {
   private container: HTMLElement;
   private callbacksRef: { current: EngineCallbacks };
@@ -293,8 +309,8 @@ export class RTRunEngine {
     this.particleMesh.instanceMatrix.needsUpdate = true;
     this.scene.add(this.particleMesh);
 
-    // Ambient atmosphere motes pool
-    const aGeo = new THREE.OctahedronGeometry(0.12, 0);
+    // Ambient voxel atmosphere motes pool
+    const aGeo = new THREE.BoxGeometry(0.2, 0.2, 0.2);
     this.ambientMat = new THREE.MeshBasicMaterial({
       color: this.currentMap.particleColor,
       transparent: true,
@@ -367,12 +383,14 @@ export class RTRunEngine {
   private rebuildTrackChunks() {
     for (const c of this.chunks) {
       this.worldGroup.remove(c);
+      disposeObject3D(c);
     }
     this.chunks = [];
     this.animatedProps = [];
 
     if (this.horizonGroup) {
       this.scene.remove(this.horizonGroup);
+      disposeObject3D(this.horizonGroup);
     }
     const vista = buildMapHorizonVista(this.currentMap, this.textures);
     this.horizonGroup = vista.group;
@@ -395,10 +413,12 @@ export class RTRunEngine {
   private clearDynamicEntities() {
     for (const obs of this.obstacles) {
       this.worldGroup.remove(obs.mesh);
+      disposeObject3D(obs.mesh);
     }
     this.obstacles = [];
     for (const c of this.coins) {
       this.worldGroup.remove(c.mesh);
+      disposeObject3D(c.mesh);
     }
     this.coins = [];
   }
@@ -409,6 +429,7 @@ export class RTRunEngine {
     this.currentSkin = next;
     const oldPos = this.runnerRig.root.position.clone();
     this.scene.remove(this.runnerRig.root);
+    disposeObject3D(this.runnerRig.root);
     this.runnerRig = buildRunnerRig(this.currentSkin, this.textures);
     this.runnerRig.root.position.copy(oldPos);
     this.scene.add(this.runnerRig.root);
@@ -988,6 +1009,7 @@ export class RTRunEngine {
 
       if (obs.spec.z > 24) {
         this.worldGroup.remove(obs.mesh);
+        disposeObject3D(obs.mesh);
         this.obstacles.splice(i, 1);
       }
     }
@@ -1037,6 +1059,7 @@ export class RTRunEngine {
       if (coin.z > 14 || coin.collected) {
         if (coin.z > 14) {
           this.worldGroup.remove(coin.mesh);
+          disposeObject3D(coin.mesh);
           this.coins.splice(i, 1);
         }
       }
